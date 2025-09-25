@@ -17,7 +17,7 @@ class MacroPlayer:
         
         # Key mappings for controller buttons to keyboard keys
         self.key_mappings = {
-            'A': 'space',
+            'A': Key.space,
             'B': 'x',
             'X': 'z',
             'Y': 'c',
