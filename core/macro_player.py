@@ -126,17 +126,11 @@ class MacroPlayer:
             
         try:
             if pressed:
-                if isinstance(key, str):
-                    self.keyboard.press(key)
-                else:
-                    self.keyboard.press(key)
+                self.keyboard.press(key)
             else:
-                if isinstance(key, str):
-                    self.keyboard.release(key)
-                else:
-                    self.keyboard.release(key)
+                self.keyboard.release(key)
         except Exception as e:
-            print(f"Error executing button event {button}: {e}")
+            print(f"Error executing button event {button}: {key} - {e}")
             
     def _execute_trigger_event(self, trigger, value):
         """Execute a trigger event"""
