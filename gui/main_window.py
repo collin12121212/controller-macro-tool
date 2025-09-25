@@ -13,18 +13,22 @@ from core.macro_recorder import MacroRecorder
 from core.macro_player import MacroPlayer
 
 class MainWindow:
-    def __init__(self, root, controller_manager, config_manager):
+    def __init__(self, root, controller_manager, config_manager, theme_manager, hotkey_manager):
         self.root = root
         self.controller_manager = controller_manager
         self.config_manager = config_manager
+        self.theme_manager = theme_manager
+        self.hotkey_manager = hotkey_manager
         self.macro_recorder = MacroRecorder(controller_manager)
         self.macro_player = MacroPlayer(controller_manager)
         
         self.is_recording = False
         self.current_macro = None
         self.macros = {}
+        self.macro_counter = 1  # Fix for macro naming issue
         
         self.setup_ui()
+        self.setup_hotkeys()
         self.start_controller_monitoring()
         
     def setup_ui(self):
@@ -49,98 +53,195 @@ class MainWindow:
         # Bottom status bar
         self.setup_status_bar()
         
+    def setup_hotkeys(self):
+        """Setup global hotkeys"""
+        # Register hotkey callbacks
+        self.hotkey_manager.register_callback('start_stop_recording', self.toggle_recording)
+        self.hotkey_manager.register_callback('play_last_macro', self.play_last_macro)
+        self.hotkey_manager.register_callback('stop_all', self.stop_all)
+        self.hotkey_manager.register_callback('quick_record', self.quick_record)
+        self.hotkey_manager.register_callback('emergency_stop', self.emergency_stop)
+        
+        # Start monitoring
+        self.hotkey_manager.start_monitoring()
+        
     def setup_left_panel(self):
         """Setup left panel with controller display"""
-        left_frame = ttk.Frame(self.paned_window)
+        left_frame = self.theme_manager.create_card_frame(self.paned_window)
         self.paned_window.add(left_frame, weight=1)
         
-        # Controller display
-        controller_label = ttk.Label(left_frame, text="Controller Status", font=('Arial', 12, 'bold'))
-        controller_label.pack(pady=(0, 10))
+        # Header
+        header_frame = ttk.Frame(left_frame)
+        header_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
         
+        controller_label = ttk.Label(header_frame, text="Controller Status", style='Heading.TLabel')
+        controller_label.pack(anchor=tk.W)
+        
+        # Controller display
         self.controller_display = ControllerDisplay(left_frame, self.controller_manager)
         
-        # Recording controls
-        controls_frame = ttk.LabelFrame(left_frame, text="Recording Controls", padding=10)
-        controls_frame.pack(fill=tk.X, pady=10)
+        # Recording controls card
+        controls_frame = self.theme_manager.create_card_frame(left_frame)
+        controls_frame.pack(fill=tk.X, padx=20, pady=20)
         
-        self.record_button = ttk.Button(controls_frame, text="Start Recording", 
-                                       command=self.toggle_recording, width=15)
-        self.record_button.pack(pady=5)
+        controls_header = ttk.Label(controls_frame, text="Recording Controls", style='Heading.TLabel')
+        controls_header.pack(anchor=tk.W, padx=20, pady=(20, 10))
         
-        self.stop_button = ttk.Button(controls_frame, text="Stop All", 
-                                     command=self.stop_all, state=tk.DISABLED, width=15)
-        self.stop_button.pack(pady=5)
+        # Button container
+        button_frame = ttk.Frame(controls_frame)
+        button_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.record_button = self.theme_manager.create_gradient_button(
+            button_frame, "Start Recording", self.toggle_recording, 'Primary'
+        )
+        self.record_button.pack(fill=tk.X, pady=5)
+        
+        self.stop_button = self.theme_manager.create_gradient_button(
+            button_frame, "Stop All", self.stop_all, 'Danger'
+        )
+        self.stop_button.pack(fill=tk.X, pady=5)
+        self.stop_button.configure(state=tk.DISABLED)
         
         # Macro name entry
         name_frame = ttk.Frame(controls_frame)
-        name_frame.pack(fill=tk.X, pady=5)
+        name_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        ttk.Label(name_frame, text="Macro Name:").pack(anchor=tk.W)
-        self.macro_name_var = tk.StringVar(value="New Macro")
+        ttk.Label(name_frame, text="Macro Name:", style='TLabel').pack(anchor=tk.W)
+        self.macro_name_var = tk.StringVar(value="")
         self.macro_name_entry = ttk.Entry(name_frame, textvariable=self.macro_name_var)
-        self.macro_name_entry.pack(fill=tk.X, pady=(2, 0))
+        self.macro_name_entry.pack(fill=tk.X, pady=(5, 0))
         
         # Recording status
         self.recording_status = ttk.Label(controls_frame, text="Ready to record", 
-                                        foreground='green')
-        self.recording_status.pack(pady=5)
+                                        style='TLabel', foreground=self.theme_manager.get_color('success'))
+        self.recording_status.pack(padx=20, pady=(0, 20))
         
     def setup_center_panel(self):
         """Setup center panel with macro list"""
-        center_frame = ttk.Frame(self.paned_window)
+        center_frame = self.theme_manager.create_card_frame(self.paned_window)
         self.paned_window.add(center_frame, weight=1)
         
-        # Macro list
-        list_label = ttk.Label(center_frame, text="Macro Library", font=('Arial', 12, 'bold'))
-        list_label.pack(pady=(0, 10))
+        # Header
+        header_frame = ttk.Frame(center_frame)
+        header_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
+        
+        list_label = ttk.Label(header_frame, text="Macro Library", style='Heading.TLabel')
+        list_label.pack(anchor=tk.W)
         
         # Macro listbox with scrollbar
         list_frame = ttk.Frame(center_frame)
-        list_frame.pack(fill=tk.BOTH, expand=True)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        self.macro_listbox = tk.Listbox(list_frame, bg='#404040', fg='white', 
-                                       selectbackground='#0078d4')
+        # Create custom listbox with modern styling
+        self.macro_listbox = tk.Listbox(
+            list_frame, 
+            bg=self.theme_manager.get_color('bg_secondary'),
+            fg=self.theme_manager.get_color('text_primary'),
+            selectbackground=self.theme_manager.get_color('accent_blue'),
+            selectforeground=self.theme_manager.get_color('text_primary'),
+            borderwidth=0,
+            highlightthickness=0,
+            font=self.theme_manager.get_font('default')
+        )
+        
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.macro_listbox.yview)
         self.macro_listbox.configure(yscrollcommand=scrollbar.set)
         
         self.macro_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # Bind events
         self.macro_listbox.bind('<<ListboxSelect>>', self.on_macro_select)
-        self.macro_listbox.bind('<Double-1>', self.play_selected_macro)
+        self.macro_listbox.bind('<Double-Button-1>', self.play_selected_macro)
         
-        # Macro management buttons
+        # Macro control buttons
         button_frame = ttk.Frame(center_frame)
-        button_frame.pack(fill=tk.X, pady=10)
+        button_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
         
-        ttk.Button(button_frame, text="Play", command=self.play_selected_macro).pack(side=tk.LEFT, padx=2)
-        ttk.Button(button_frame, text="Edit", command=self.edit_selected_macro).pack(side=tk.LEFT, padx=2)
-        ttk.Button(button_frame, text="Delete", command=self.delete_selected_macro).pack(side=tk.LEFT, padx=2)
-        ttk.Button(button_frame, text="Save", command=self.save_macros).pack(side=tk.RIGHT, padx=2)
-        ttk.Button(button_frame, text="Load", command=self.load_macros).pack(side=tk.RIGHT, padx=2)
+        # Create modern buttons in a grid
+        btn_style_frame = ttk.Frame(button_frame)
+        btn_style_frame.pack(fill=tk.X)
+        
+        play_btn = self.theme_manager.create_gradient_button(
+            btn_style_frame, "▶ Play", self.play_selected_macro, 'Success'
+        )
+        play_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        edit_btn = self.theme_manager.create_gradient_button(
+            btn_style_frame, "✏ Edit", self.edit_selected_macro, 'Primary'
+        )
+        edit_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        delete_btn = self.theme_manager.create_gradient_button(
+            btn_style_frame, "🗑 Delete", self.delete_selected_macro, 'Danger'
+        )
+        delete_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        
+        # File operations
+        file_frame = ttk.Frame(button_frame)
+        file_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        save_btn = ttk.Button(file_frame, text="💾 Save Library", command=self.save_macros)
+        save_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        load_btn = ttk.Button(file_frame, text="📁 Load Library", command=self.load_macros)
+        load_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
     def setup_right_panel(self):
         """Setup right panel with macro editor"""
-        right_frame = ttk.Frame(self.paned_window)
+        right_frame = self.theme_manager.create_card_frame(self.paned_window)
         self.paned_window.add(right_frame, weight=2)
         
-        # Macro editor
-        editor_label = ttk.Label(right_frame, text="Macro Editor", font=('Arial', 12, 'bold'))
-        editor_label.pack(pady=(0, 10))
+        # Header
+        header_frame = ttk.Frame(right_frame)
+        header_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
         
+        editor_label = ttk.Label(header_frame, text="Macro Editor", style='Heading.TLabel')
+        editor_label.pack(anchor=tk.W)
+        
+        # Hotkey info card
+        hotkey_card = self.theme_manager.create_card_frame(right_frame)
+        hotkey_card.pack(fill=tk.X, padx=20, pady=10)
+        
+        hotkey_header = ttk.Label(hotkey_card, text="Global Hotkeys", style='TLabel')
+        hotkey_header.pack(anchor=tk.W, padx=15, pady=(15, 5))
+        
+        hotkeys_info = [
+            "Ctrl+R: Start/Stop Recording",
+            "Ctrl+P: Play Last Macro", 
+            "Ctrl+S: Stop All",
+            "F9: Quick Record",
+            "F10: Emergency Stop"
+        ]
+        
+        for hotkey in hotkeys_info:
+            hotkey_label = ttk.Label(hotkey_card, text=f"• {hotkey}", style='Muted.TLabel')
+            hotkey_label.pack(anchor=tk.W, padx=25, pady=2)
+        
+        # Add some padding at bottom
+        ttk.Label(hotkey_card, text="").pack(pady=5)
+        
+        # Macro editor
         self.macro_editor = MacroEditor(right_frame, self.config_manager)
         
     def setup_status_bar(self):
         """Setup bottom status bar"""
-        self.status_frame = ttk.Frame(self.main_frame)
+        self.status_frame = ttk.Frame(self.main_frame, style='Card.TFrame')
         self.status_frame.pack(fill=tk.X, pady=(10, 0))
         
-        self.status_label = ttk.Label(self.status_frame, text="Ready")
+        # Status content
+        status_content = ttk.Frame(self.status_frame)
+        status_content.pack(fill=tk.X, padx=20, pady=10)
+        
+        self.status_label = ttk.Label(status_content, text="Ready", style='TLabel')
         self.status_label.pack(side=tk.LEFT)
         
-        # Controller status
-        self.controller_status_label = ttk.Label(self.status_frame, text="No controller detected")
+        # Controller status with modern styling
+        self.controller_status_label = ttk.Label(
+            status_content, 
+            text="🎮 No controller detected", 
+            style='Muted.TLabel'
+        )
         self.controller_status_label.pack(side=tk.RIGHT)
         
     def start_controller_monitoring(self):
@@ -196,9 +297,19 @@ class MainWindow:
             macro_data = self.macro_recorder.stop_recording()
             
             if macro_data and len(macro_data) > 0:
-                macro_name = self.macro_name_var.get().strip()
+                # Get macro name from input or generate unique name
+                macro_name = getattr(self, 'macro_name_var', None)
+                if macro_name:
+                    macro_name = macro_name.get().strip()
+                
                 if not macro_name:
-                    macro_name = f"Macro_{len(self.macros) + 1}"
+                    # Generate unique name
+                    base_name = f"Macro_{self.macro_counter}"
+                    while base_name in self.macros:
+                        self.macro_counter += 1
+                        base_name = f"Macro_{self.macro_counter}"
+                    macro_name = base_name
+                    self.macro_counter += 1
                     
                 self.macros[macro_name] = macro_data
                 self.update_macro_list()
@@ -206,9 +317,13 @@ class MainWindow:
             else:
                 self.status_label.configure(text="No inputs recorded")
                 
-        self.record_button.configure(text="Start Recording")
-        self.stop_button.configure(state=tk.DISABLED)
-        self.recording_status.configure(text="Ready to record", foreground='green')
+        # Update UI elements if they exist
+        if hasattr(self, 'record_button'):
+            self.record_button.configure(text="Start Recording")
+        if hasattr(self, 'stop_button'):
+            self.stop_button.configure(state=tk.DISABLED)
+        if hasattr(self, 'recording_status'):
+            self.recording_status.configure(text="Ready to record", foreground='green')
         
     def stop_all(self):
         """Stop all recording and playback"""
@@ -304,3 +419,29 @@ class MainWindow:
         if self.is_recording:
             self.stop_recording()
         self.macro_player.stop_playback()
+        
+    # Hotkey callback methods
+    def play_last_macro(self):
+        """Play the most recently created or used macro"""
+        if not self.macros:
+            return
+            
+        # Get the last macro (by creation order or most recent)
+        last_macro_name = list(self.macros.keys())[-1]
+        macro_data = self.macros[last_macro_name]
+        
+        if macro_data:
+            self.macro_player.play_macro(macro_data)
+            self.status_label.configure(text=f"Playing macro '{last_macro_name}' via hotkey")
+            
+    def quick_record(self):
+        """Quick record with auto-generated name"""
+        if not self.is_recording:
+            self.start_recording()
+        else:
+            self.stop_recording()
+            
+    def emergency_stop(self):
+        """Emergency stop all operations"""
+        self.stop_all()
+        self.status_label.configure(text="Emergency stop activated!", foreground=self.theme_manager.get_color('error'))

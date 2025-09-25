@@ -33,14 +33,18 @@ except ImportError as e:
 import threading
 
 from gui.main_window import MainWindow
+from gui.theme_manager import ThemeManager
 from core.controller_manager import ControllerManager
 from core.config_manager import ConfigManager
+from core.hotkey_manager import HotkeyManager
 
 class ControllerMacroApp:
     def __init__(self):
         self.root = tk.Tk()
         self.config_manager = ConfigManager()
         self.controller_manager = ControllerManager()
+        self.theme_manager = ThemeManager()
+        self.hotkey_manager = HotkeyManager()
         self.main_window = None
         
         self.setup_application()
@@ -48,8 +52,8 @@ class ControllerMacroApp:
     def setup_application(self):
         """Initialize the application"""
         self.root.title("Controller Macro Tool")
-        self.root.geometry("1200x800")
-        self.root.minsize(800, 600)
+        self.root.geometry("1400x900")
+        self.root.minsize(900, 700)
         
         # Set application icon (if available)
         try:
@@ -57,29 +61,20 @@ class ControllerMacroApp:
         except:
             pass
             
-        # Apply dark theme
-        self.apply_theme()
+        # Apply modern theme
+        self.style = self.theme_manager.apply_theme(self.root)
         
-        # Initialize main window
-        self.main_window = MainWindow(self.root, self.controller_manager, self.config_manager)
+        # Initialize main window with new managers
+        self.main_window = MainWindow(
+            self.root, 
+            self.controller_manager, 
+            self.config_manager,
+            self.theme_manager,
+            self.hotkey_manager
+        )
         
         # Setup shutdown handling
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
-    def apply_theme(self):
-        """Apply dark theme to the application"""
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        # Configure colors for dark theme
-        style.configure('TLabel', background='#2b2b2b', foreground='white')
-        style.configure('TFrame', background='#2b2b2b')
-        style.configure('TButton', background='#404040', foreground='white')
-        style.configure('TEntry', background='#404040', foreground='white')
-        style.configure('TNotebook', background='#2b2b2b')
-        style.configure('TNotebook.Tab', background='#404040', foreground='white')
-        
-        self.root.configure(bg='#2b2b2b')
         
     def run(self):
         """Start the application"""
@@ -94,6 +89,8 @@ class ControllerMacroApp:
             self.main_window.cleanup()
         if self.controller_manager:
             self.controller_manager.cleanup()
+        if self.hotkey_manager:
+            self.hotkey_manager.stop_monitoring()
         self.root.quit()
         self.root.destroy()
 
