@@ -43,7 +43,8 @@ class MacroPlayer:
         
     def play_macro(self, macro_events, settings=None):
         """Play a recorded macro"""
-        if self.playing:
+        # Use is_playing() method for consistent state checking
+        if self.is_playing():
             return False
             
         if not macro_events:
@@ -112,6 +113,7 @@ class MacroPlayer:
             print(f"Error in playback loop: {e}")
         finally:
             self.playing = False
+            self.playback_thread = None  # Clear thread reference when loop ends
             self._reset_virtual_state()  # Reset virtual state when playback ends
             
     def _execute_event(self, event):
@@ -199,17 +201,22 @@ class MacroPlayer:
             
     def is_playing(self):
         """Check if macro is currently playing"""
-        # Check both the playing flag and thread status for more accurate state
+        # If playing flag is false, we're definitely not playing
         if not self.playing:
             return False
         
-        # If playing flag is true but thread is dead, reset the playing flag
-        if self.playback_thread and not self.playback_thread.is_alive():
+        # If there's no thread, we're not playing
+        if not self.playback_thread:
             self.playing = False
+            return False
+            
+        # If playing flag is true but thread is dead, reset the playing flag
+        if not self.playback_thread.is_alive():
+            self.playing = False  
             self.playback_thread = None
             return False
             
-        return self.playing
+        return True
         
     def get_playback_status(self):
         """Get current playback status"""

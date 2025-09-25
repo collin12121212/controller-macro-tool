@@ -283,7 +283,7 @@ class ControllerDisplay:
             
             # Movement indicator (small circle that moves)
             offset_x = stick_pos[0] * 13  # Scale for smaller canvas
-            offset_y = -stick_pos[1] * 13  # Invert Y axis for correct direction
+            offset_y = stick_pos[1] * 13  # Use normal Y axis direction
             
             # Clamp to base circle
             distance = math.sqrt(offset_x**2 + offset_y**2)
