@@ -94,8 +94,8 @@ class MainWindow:
         controller_label = ttk.Label(header_frame, text="Controller Status", style='Heading.TLabel')
         controller_label.pack(anchor=tk.W)
         
-        # Controller display
-        self.controller_display = ControllerDisplay(left_frame, self.controller_manager)
+        # Controller display - pass macro_player for virtual state during playback
+        self.controller_display = ControllerDisplay(left_frame, self.controller_manager, self.macro_player)
         
         # Recording controls card
         controls_frame = self.theme_manager.create_card_frame(left_frame)

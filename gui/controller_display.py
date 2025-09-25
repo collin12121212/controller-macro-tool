@@ -10,9 +10,10 @@ import time
 import math
 
 class ControllerDisplay:
-    def __init__(self, parent, controller_manager):
+    def __init__(self, parent, controller_manager, macro_player=None):
         self.parent = parent
         self.controller_manager = controller_manager
+        self.macro_player = macro_player  # Add macro_player for virtual state access
         self.canvas_width = 300  # Will be updated in setup_display
         self.canvas_height = 240
         
@@ -467,12 +468,27 @@ class ControllerDisplay:
         def update_loop():
             while True:
                 try:
-                    controllers = self.controller_manager.get_connected_controllers()
-                    if controllers:
-                        controller_id = controllers[0]
-                        state = self.controller_manager.get_controller_state(controller_id)
-                        if state:
-                            self.parent.after(0, lambda: self.update_display(state))
+                    # Check if macro is playing and get virtual state first
+                    if self.macro_player and self.macro_player.is_playing():
+                        virtual_state = self.macro_player.get_virtual_controller_state()
+                        if virtual_state:
+                            self.parent.after(0, lambda: self.update_display(virtual_state))
+                        else:
+                            # Fallback to real controller if virtual state unavailable
+                            controllers = self.controller_manager.get_connected_controllers()
+                            if controllers:
+                                controller_id = controllers[0]
+                                state = self.controller_manager.get_controller_state(controller_id)
+                                if state:
+                                    self.parent.after(0, lambda: self.update_display(state))
+                    else:
+                        # Normal operation - show real controller input
+                        controllers = self.controller_manager.get_connected_controllers()
+                        if controllers:
+                            controller_id = controllers[0]
+                            state = self.controller_manager.get_controller_state(controller_id)
+                            if state:
+                                self.parent.after(0, lambda: self.update_display(state))
                     
                     time.sleep(1/30)  # 30 FPS update rate
                 except Exception as e:
