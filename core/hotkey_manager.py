@@ -30,6 +30,13 @@ class HotkeyManager:
         # Callback functions
         self.callbacks = {}
         
+        # Dynamic macro hotkeys - maps macro names to their hotkeys
+        self.macro_hotkeys = {}
+        
+        # Track recently triggered hotkeys to prevent double-triggering
+        self.recently_triggered = set()
+        self.trigger_cooldown = 0.5  # 500ms cooldown
+        
     def set_hotkey(self, action, keys):
         """Set a hotkey for a specific action"""
         if isinstance(keys, (str, KeyCode, Key)):
@@ -42,6 +49,51 @@ class HotkeyManager:
     def register_callback(self, action, callback):
         """Register a callback function for a hotkey action"""
         self.callbacks[action] = callback
+        
+    def set_macro_hotkey(self, macro_name, keys):
+        """Set a hotkey for a specific macro"""
+        if not keys:
+            # Remove hotkey if keys is empty
+            if macro_name in self.macro_hotkeys:
+                del self.macro_hotkeys[macro_name]
+            return True
+            
+        if isinstance(keys, (str, KeyCode, Key)):
+            keys = {keys}
+        elif isinstance(keys, (list, tuple)):
+            keys = set(keys)
+        elif isinstance(keys, str):
+            keys = self.parse_hotkey_string(keys)
+            
+        # Check for conflicts with existing hotkeys
+        if self._has_hotkey_conflict(keys, macro_name):
+            return False
+            
+        self.macro_hotkeys[macro_name] = keys
+        return True
+        
+    def get_macro_hotkey(self, macro_name):
+        """Get the hotkey assigned to a macro"""
+        return self.macro_hotkeys.get(macro_name, set())
+        
+    def remove_macro_hotkey(self, macro_name):
+        """Remove a macro's hotkey"""
+        if macro_name in self.macro_hotkeys:
+            del self.macro_hotkeys[macro_name]
+            
+    def _has_hotkey_conflict(self, keys, macro_name=None):
+        """Check if the given keys conflict with existing hotkeys"""
+        # Check system hotkeys
+        for action, existing_keys in self.hotkeys.items():
+            if keys == existing_keys:
+                return True
+                
+        # Check macro hotkeys (excluding the current macro)
+        for existing_macro, existing_keys in self.macro_hotkeys.items():
+            if existing_macro != macro_name and keys == existing_keys:
+                return True
+                
+        return False
         
     def start_monitoring(self):
         """Start monitoring for global hotkeys"""
@@ -93,9 +145,41 @@ class HotkeyManager:
             
     def _check_hotkey_combinations(self):
         """Check if any hotkey combinations are currently pressed"""
+        current_time = time.time()
+        
+        # Check system hotkeys
         for action, hotkey_combo in self.hotkeys.items():
             if hotkey_combo.issubset(self.pressed_keys):
-                self._trigger_hotkey(action)
+                action_key = f"system_{action}"
+                if action_key not in self.recently_triggered:
+                    self._trigger_hotkey(action)
+                    self.recently_triggered.add(action_key)
+                    # Schedule removal of cooldown
+                    threading.Timer(self.trigger_cooldown, 
+                                   lambda: self.recently_triggered.discard(action_key)).start()
+                                   
+        # Check macro hotkeys
+        for macro_name, hotkey_combo in self.macro_hotkeys.items():
+            if hotkey_combo.issubset(self.pressed_keys):
+                macro_key = f"macro_{macro_name}"
+                if macro_key not in self.recently_triggered:
+                    self._trigger_macro_hotkey(macro_name)
+                    self.recently_triggered.add(macro_key)
+                    # Schedule removal of cooldown
+                    threading.Timer(self.trigger_cooldown,
+                                   lambda: self.recently_triggered.discard(macro_key)).start()
+                
+    def _trigger_macro_hotkey(self, macro_name):
+        """Trigger a macro-specific hotkey"""
+        callback = self.callbacks.get('play_macro')
+        if callback:
+            try:
+                # Run callback in a separate thread to avoid blocking
+                thread = threading.Thread(target=lambda: callback(macro_name), daemon=True)
+                thread.start()
+                print(f"Triggered macro hotkey: {macro_name}")
+            except Exception as e:
+                print(f"Error executing macro hotkey callback for {macro_name}: {e}")
                 
     def _trigger_hotkey(self, action):
         """Trigger a hotkey action"""
@@ -109,14 +193,21 @@ class HotkeyManager:
             except Exception as e:
                 print(f"Error executing hotkey callback for {action}: {e}")
                 
-    def get_hotkey_string(self, action):
-        """Get a human-readable string for a hotkey"""
-        hotkey_combo = self.hotkeys.get(action, set())
+    def get_macro_hotkey_string(self, macro_name):
+        """Get a human-readable string for a macro's hotkey"""
+        hotkey_combo = self.macro_hotkeys.get(macro_name, set())
         if not hotkey_combo:
             return "Not set"
             
+        return self._keys_to_string(hotkey_combo)
+        
+    def _keys_to_string(self, keys):
+        """Convert a set of keys to a human-readable string"""
+        if not keys:
+            return "Not set"
+            
         key_names = []
-        for key in hotkey_combo:
+        for key in keys:
             if hasattr(key, 'name'):
                 if key == Key.ctrl_l or key == Key.ctrl_r:
                     key_names.append('Ctrl')
@@ -132,6 +223,11 @@ class HotkeyManager:
                 key_names.append(str(key))
                 
         return ' + '.join(sorted(key_names))
+        
+    def get_hotkey_string(self, action):
+        """Get a human-readable string for a system hotkey"""
+        hotkey_combo = self.hotkeys.get(action, set())
+        return self._keys_to_string(hotkey_combo)
         
     def get_all_hotkeys(self):
         """Get all configured hotkeys with their string representations"""

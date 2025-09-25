@@ -74,8 +74,8 @@ class ConfigManager:
         """Set a specific setting value"""
         self.settings[key] = value
         
-    def save_macros(self, macros, file_path=None):
-        """Save macros to file"""
+    def save_macros(self, macros, file_path=None, metadata=None):
+        """Save macros to file with optional metadata"""
         if file_path is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_path = os.path.join(self.macros_dir, f"macros_{timestamp}.json")
@@ -83,9 +83,10 @@ class ConfigManager:
         try:
             # Prepare data for saving
             save_data = {
-                'version': '1.0',
+                'version': '1.1',  # Updated version to support metadata
                 'created': datetime.now().isoformat(),
-                'macros': macros
+                'macros': macros,
+                'metadata': metadata or {}
             }
             
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -104,16 +105,18 @@ class ConfigManager:
                 
             # Handle different file formats
             if isinstance(data, dict) and 'macros' in data:
-                return data['macros']
+                macros = data['macros']
+                metadata = data.get('metadata', {})
+                return macros, metadata
             elif isinstance(data, dict):
-                # Assume it's a direct macro dictionary
-                return data
+                # Assume it's a direct macro dictionary (old format)
+                return data, {}
             else:
-                return {}
+                return {}, {}
                 
         except Exception as e:
             print(f"Error loading macros: {e}")
-            return {}
+            return {}, {}
             
     def get_recent_macro_files(self, limit=10):
         """Get list of recent macro files"""
