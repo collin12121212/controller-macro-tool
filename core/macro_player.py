@@ -15,6 +15,14 @@ class MacroPlayer:
         self.keyboard = KeyboardController()
         self.mouse = MouseController()
         
+        # Virtual controller state for display updates during playback
+        self.virtual_controller_state = {
+            'buttons': {},
+            'dpad': {},
+            'sticks': {'left': (0.0, 0.0), 'right': (0.0, 0.0)},
+            'triggers': {'LT': 0.0, 'RT': 0.0}
+        }
+        
         # Key mappings for controller buttons to keyboard keys
         self.key_mappings = {
             'A': Key.space,
@@ -45,6 +53,9 @@ class MacroPlayer:
         if settings is None:
             settings = {'loops': 1, 'speed': 1.0}
             
+        # Reset virtual state at start of playback
+        self._reset_virtual_state()
+            
         self.playing = True
         self.playback_thread = threading.Thread(
             target=self._playback_loop,
@@ -61,6 +72,12 @@ class MacroPlayer:
         
         if self.playback_thread:
             self.playback_thread.join(timeout=2)
+            # Ensure the thread reference is cleared after joining
+            if not self.playback_thread.is_alive():
+                self.playback_thread = None
+        
+        # Always reset virtual state when stopping
+        self._reset_virtual_state()
             
     def _playback_loop(self, macro_events, settings):
         """Main playback loop"""
@@ -95,6 +112,7 @@ class MacroPlayer:
             print(f"Error in playback loop: {e}")
         finally:
             self.playing = False
+            self._reset_virtual_state()  # Reset virtual state when playback ends
             
     def _execute_event(self, event):
         """Execute a single macro event"""
@@ -102,6 +120,9 @@ class MacroPlayer:
             event_type = event.get('type')
             button = event.get('button')
             value = event.get('value')
+            
+            # Update virtual controller state for display
+            self._update_virtual_state(event_type, button, value)
             
             if event_type == 'button':
                 self._execute_button_event(button, value)
@@ -117,6 +138,20 @@ class MacroPlayer:
                 
         except Exception as e:
             print(f"Error executing event: {e}")
+            
+    def _update_virtual_state(self, event_type, button, value):
+        """Update virtual controller state for display purposes"""
+        try:
+            if event_type == 'button':
+                self.virtual_controller_state['buttons'][button] = value
+            elif event_type == 'dpad':
+                self.virtual_controller_state['dpad'][button] = value
+            elif event_type == 'trigger':
+                self.virtual_controller_state['triggers'][button] = value
+            elif event_type == 'stick':
+                self.virtual_controller_state['sticks'][button] = value
+        except Exception as e:
+            print(f"Error updating virtual state: {e}")
             
     def _execute_button_event(self, button, pressed):
         """Execute a button press/release event"""
@@ -164,6 +199,16 @@ class MacroPlayer:
             
     def is_playing(self):
         """Check if macro is currently playing"""
+        # Check both the playing flag and thread status for more accurate state
+        if not self.playing:
+            return False
+        
+        # If playing flag is true but thread is dead, reset the playing flag
+        if self.playback_thread and not self.playback_thread.is_alive():
+            self.playing = False
+            self.playback_thread = None
+            return False
+            
         return self.playing
         
     def get_playback_status(self):
@@ -171,4 +216,19 @@ class MacroPlayer:
         return {
             'playing': self.playing,
             'thread_alive': self.playback_thread.is_alive() if self.playback_thread else False
+        }
+        
+    def get_virtual_controller_state(self):
+        """Get the current virtual controller state during playback"""
+        if self.is_playing():
+            return self.virtual_controller_state.copy()
+        return None
+        
+    def _reset_virtual_state(self):
+        """Reset virtual controller state to default"""
+        self.virtual_controller_state = {
+            'buttons': {},
+            'dpad': {},
+            'sticks': {'left': (0.0, 0.0), 'right': (0.0, 0.0)},
+            'triggers': {'LT': 0.0, 'RT': 0.0}
         }
