@@ -9,6 +9,7 @@ import time
 
 from .controller_display import ControllerDisplay
 from .macro_editor import MacroEditor
+from .notification_manager import NotificationManager, StatusManager
 from core.macro_recorder import MacroRecorder
 from core.macro_player import MacroPlayer
 
@@ -27,7 +28,12 @@ class MainWindow:
         self.macros = {}
         self.macro_counter = 1  # Fix for macro naming issue
         
+        # Initialize notification system
+        self.notification_manager = None  # Will be initialized after UI setup
+        self.status_manager = None        # Will be initialized after status bar setup
+        
         self.setup_ui()
+        self.setup_notifications()
         self.setup_hotkeys()
         self.start_controller_monitoring()
         
@@ -52,6 +58,17 @@ class MainWindow:
         
         # Bottom status bar
         self.setup_status_bar()
+        
+    def setup_notifications(self):
+        """Setup notification system"""
+        self.notification_manager = NotificationManager(self.root, self.theme_manager)
+        self.status_manager = StatusManager(self.status_label, self.theme_manager)
+        
+        # Show welcome notification
+        self.notification_manager.show_notification(
+            "Controller Macro Tool Ready! Press Ctrl+R to start recording.",
+            "info"
+        )
         
     def setup_hotkeys(self):
         """Setup global hotkeys"""
@@ -275,20 +292,46 @@ class MainWindow:
     def start_recording(self):
         """Start recording a new macro"""
         if not self.controller_manager.get_connected_controllers():
-            messagebox.showerror("Error", "No controller detected!")
+            self.notification_manager.show_notification(
+                "No controller detected! Please connect a controller first.",
+                "error"
+            )
             return
             
-        self.is_recording = True
-        self.record_button.configure(text="Stop Recording", style='Accent.TButton')
-        self.stop_button.configure(state=tk.NORMAL)
-        self.recording_status.configure(text="Recording...", foreground='red')
-        
-        # Start recording in separate thread
-        def record():
-            self.current_macro = self.macro_recorder.start_recording()
+        try:
+            self.is_recording = True
             
-        thread = threading.Thread(target=record, daemon=True)
-        thread.start()
+            # Update UI
+            self.record_button.configure(text="Stop Recording", style='Danger.TButton')
+            self.stop_button.configure(state=tk.NORMAL)
+            self.recording_status.configure(
+                text="🔴 Recording...", 
+                foreground=self.theme_manager.get_color('error')
+            )
+            
+            # Update status
+            self.status_manager.update_status("Recording macro... Use your controller", "recording")
+            
+            # Show notification
+            self.notification_manager.show_notification(
+                "Recording started! Use your controller to record inputs.",
+                "success",
+                4000
+            )
+            
+            # Start recording in separate thread
+            def record():
+                self.current_macro = self.macro_recorder.start_recording()
+                
+            thread = threading.Thread(target=record, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            self.notification_manager.show_notification(
+                f"Failed to start recording: {str(e)}",
+                "error"
+            )
+            self.is_recording = False
         
     def stop_recording(self):
         """Stop recording and save macro"""
@@ -313,23 +356,47 @@ class MainWindow:
                     
                 self.macros[macro_name] = macro_data
                 self.update_macro_list()
-                self.status_label.configure(text=f"Recorded macro '{macro_name}' with {len(macro_data)} inputs")
+                
+                # Update status and show notification
+                status_msg = f"Recorded '{macro_name}' with {len(macro_data)} inputs"
+                self.status_manager.update_status(status_msg, "success")
+                self.notification_manager.show_notification(
+                    f"Macro '{macro_name}' saved successfully! ({len(macro_data)} inputs recorded)",
+                    "success"
+                )
+                
+                # Clear name field for next recording
+                if hasattr(self, 'macro_name_var'):
+                    self.macro_name_var.set("")
+                    
             else:
-                self.status_label.configure(text="No inputs recorded")
+                self.status_manager.update_status("No inputs recorded", "warning")
+                self.notification_manager.show_notification(
+                    "No controller inputs were recorded. Try moving buttons or sticks.",
+                    "warning"
+                )
                 
         # Update UI elements if they exist
         if hasattr(self, 'record_button'):
-            self.record_button.configure(text="Start Recording")
+            self.record_button.configure(text="Start Recording", style='Primary.TButton')
         if hasattr(self, 'stop_button'):
             self.stop_button.configure(state=tk.DISABLED)
         if hasattr(self, 'recording_status'):
-            self.recording_status.configure(text="Ready to record", foreground='green')
+            self.recording_status.configure(
+                text="Ready to record", 
+                foreground=self.theme_manager.get_color('success')
+            )
         
     def stop_all(self):
         """Stop all recording and playback"""
         self.stop_recording()
         self.macro_player.stop_playback()
-        self.status_label.configure(text="All operations stopped")
+        
+        self.status_manager.update_status("All operations stopped", "info")
+        self.notification_manager.show_notification(
+            "All operations stopped",
+            "info"
+        )
         
     def on_macro_select(self, event):
         """Handle macro selection"""
@@ -338,20 +405,59 @@ class MainWindow:
             macro_name = self.macro_listbox.get(selection[0])
             if macro_name in self.macros:
                 self.macro_editor.load_macro(self.macros[macro_name])
+                self.status_manager.update_status(f"Selected macro: {macro_name}", "info")
                 
     def play_selected_macro(self, event=None):
         """Play the selected macro"""
         selection = self.macro_listbox.curselection()
         if not selection:
-            messagebox.showwarning("Warning", "Please select a macro to play")
+            self.notification_manager.show_notification(
+                "Please select a macro from the library to play",
+                "warning"
+            )
             return
             
         macro_name = self.macro_listbox.get(selection[0])
         if macro_name in self.macros:
+            macro_data = self.macros[macro_name]
+            
+            # Check if macro player is already playing
+            if self.macro_player.is_playing():
+                self.notification_manager.show_notification(
+                    "Already playing a macro. Stop current playback first.",
+                    "warning"
+                )
+                return
+                
             def play():
-                self.status_label.configure(text=f"Playing macro '{macro_name}'...")
-                self.macro_player.play_macro(self.macros[macro_name])
-                self.root.after(0, lambda: self.status_label.configure(text="Playback completed"))
+                try:
+                    self.status_manager.update_status(f"Playing macro '{macro_name}'...", "playing")
+                    success = self.macro_player.play_macro(macro_data)
+                    
+                    if success:
+                        self.root.after(0, lambda: self.notification_manager.show_notification(
+                            f"Playing macro '{macro_name}' ({len(macro_data)} inputs)",
+                            "success"
+                        ))
+                        
+                        # Wait for playback to complete
+                        while self.macro_player.is_playing():
+                            time.sleep(0.1)
+                            
+                        self.root.after(0, lambda: self.status_manager.update_status(
+                            f"Playback of '{macro_name}' completed", "success"
+                        ))
+                    else:
+                        self.root.after(0, lambda: self.notification_manager.show_notification(
+                            f"Failed to start playback of '{macro_name}'",
+                            "error"
+                        ))
+                        
+                except Exception as e:
+                    self.root.after(0, lambda: self.notification_manager.show_notification(
+                        f"Error playing macro: {str(e)}",
+                        "error"
+                    ))
                 
             thread = threading.Thread(target=play, daemon=True)
             thread.start()
@@ -372,14 +478,39 @@ class MainWindow:
         """Delete the selected macro"""
         selection = self.macro_listbox.curselection()
         if not selection:
-            messagebox.showwarning("Warning", "Please select a macro to delete")
+            self.notification_manager.show_notification(
+                "Please select a macro to delete",
+                "warning"
+            )
             return
             
         macro_name = self.macro_listbox.get(selection[0])
-        if messagebox.askyesno("Confirm Delete", f"Delete macro '{macro_name}'?"):
-            del self.macros[macro_name]
-            self.update_macro_list()
-            self.status_label.configure(text=f"Deleted macro '{macro_name}'")
+        
+        # Enhanced confirmation dialog
+        confirm = messagebox.askyesno(
+            "Confirm Delete", 
+            f"Are you sure you want to delete macro '{macro_name}'?\n\nThis action cannot be undone.",
+            icon='warning'
+        )
+        
+        if confirm:
+            try:
+                del self.macros[macro_name]
+                self.update_macro_list()
+                self.status_manager.update_status(f"Deleted macro '{macro_name}'", "info")
+                self.notification_manager.show_notification(
+                    f"Macro '{macro_name}' deleted successfully",
+                    "success"
+                )
+                
+                # Clear editor if this macro was loaded
+                self.macro_editor.load_macro([])
+                
+            except Exception as e:
+                self.notification_manager.show_notification(
+                    f"Failed to delete macro: {str(e)}",
+                    "error"
+                )
             
     def update_macro_list(self):
         """Update the macro listbox"""
@@ -389,6 +520,13 @@ class MainWindow:
             
     def save_macros(self):
         """Save macros to file"""
+        if not self.macros:
+            self.notification_manager.show_notification(
+                "No macros to save. Record some macros first!",
+                "warning"
+            )
+            return
+            
         file_path = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
@@ -396,9 +534,16 @@ class MainWindow:
         if file_path:
             try:
                 self.config_manager.save_macros(self.macros, file_path)
-                self.status_label.configure(text=f"Macros saved to {file_path}")
+                self.status_manager.update_status(f"Macros saved to {file_path}", "success")
+                self.notification_manager.show_notification(
+                    f"Successfully saved {len(self.macros)} macros",
+                    "success"
+                )
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to save macros: {str(e)}")
+                self.notification_manager.show_notification(
+                    f"Failed to save macros: {str(e)}",
+                    "error"
+                )
                 
     def load_macros(self):
         """Load macros from file"""
@@ -408,11 +553,27 @@ class MainWindow:
         if file_path:
             try:
                 loaded_macros = self.config_manager.load_macros(file_path)
-                self.macros.update(loaded_macros)
-                self.update_macro_list()
-                self.status_label.configure(text=f"Loaded {len(loaded_macros)} macros from {file_path}")
+                if loaded_macros:
+                    self.macros.update(loaded_macros)
+                    self.update_macro_list()
+                    self.status_manager.update_status(
+                        f"Loaded {len(loaded_macros)} macros from {file_path}", 
+                        "success"
+                    )
+                    self.notification_manager.show_notification(
+                        f"Successfully loaded {len(loaded_macros)} macros",
+                        "success"
+                    )
+                else:
+                    self.notification_manager.show_notification(
+                        "No macros found in the selected file",
+                        "warning"
+                    )
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to load macros: {str(e)}")
+                self.notification_manager.show_notification(
+                    f"Failed to load macros: {str(e)}",
+                    "error"
+                )
                 
     def cleanup(self):
         """Cleanup resources"""
@@ -424,24 +585,56 @@ class MainWindow:
     def play_last_macro(self):
         """Play the most recently created or used macro"""
         if not self.macros:
+            self.notification_manager.show_notification(
+                "No macros available to play. Record a macro first!",
+                "warning"
+            )
             return
             
         # Get the last macro (by creation order or most recent)
         last_macro_name = list(self.macros.keys())[-1]
         macro_data = self.macros[last_macro_name]
         
-        if macro_data:
-            self.macro_player.play_macro(macro_data)
-            self.status_label.configure(text=f"Playing macro '{last_macro_name}' via hotkey")
+        if macro_data and not self.macro_player.is_playing():
+            def play():
+                success = self.macro_player.play_macro(macro_data)
+                if success:
+                    self.root.after(0, lambda: self.notification_manager.show_notification(
+                        f"Playing '{last_macro_name}' via hotkey",
+                        "success"
+                    ))
+                    self.root.after(0, lambda: self.status_manager.update_status(
+                        f"Playing '{last_macro_name}' via hotkey", "playing"
+                    ))
+                    
+            thread = threading.Thread(target=play, daemon=True)
+            thread.start()
+        elif self.macro_player.is_playing():
+            self.notification_manager.show_notification(
+                "Already playing a macro",
+                "warning"
+            )
             
     def quick_record(self):
         """Quick record with auto-generated name"""
         if not self.is_recording:
             self.start_recording()
+            self.notification_manager.show_notification(
+                "Quick record started! (F9 to stop)",
+                "info"
+            )
         else:
             self.stop_recording()
             
     def emergency_stop(self):
         """Emergency stop all operations"""
         self.stop_all()
-        self.status_label.configure(text="Emergency stop activated!", foreground=self.theme_manager.get_color('error'))
+        self.notification_manager.show_notification(
+            "EMERGENCY STOP: All operations halted!",
+            "error",
+            duration=5000
+        )
+        self.status_manager.update_status(
+            "Emergency stop activated!", 
+            "error"
+        )
