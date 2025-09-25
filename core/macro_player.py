@@ -151,7 +151,12 @@ class MacroPlayer:
             elif event_type == 'trigger':
                 self.virtual_controller_state['triggers'][button] = value
             elif event_type == 'stick':
-                self.virtual_controller_state['sticks'][button] = value
+                # Normalize stick names: 'stick_left' -> 'left', 'stick_right' -> 'right'
+                if button.startswith('stick_'):
+                    stick_name = button[6:]  # Remove 'stick_' prefix
+                else:
+                    stick_name = button
+                self.virtual_controller_state['sticks'][stick_name] = value
         except Exception as e:
             print(f"Error updating virtual state: {e}")
             
