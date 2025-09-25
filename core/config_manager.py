@@ -131,4 +131,9 @@ class ConfigManager:
                     })
                     
             # Sort by modification time (newest first)
-            macro_files.sort(key=lambda x
+            macro_files.sort(key=lambda x: x['modified'], reverse=True)
+            return macro_files[:limit]
+            
+        except Exception as e:
+            print(f"Error getting recent macro files: {e}")
+            return []
