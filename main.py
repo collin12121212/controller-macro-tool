@@ -5,13 +5,32 @@ A comprehensive tool for recording and playing back controller macros with a mod
 """
 
 import sys
-import tkinter as tk
-from tkinter import ttk, messagebox
-import threading
 import os
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Check for required dependencies
+try:
+    import pygame
+    import pynput
+except ImportError as e:
+    print(f"Missing dependency: {e}")
+    print("Please run: pip install -r requirements.txt")
+    sys.exit(1)
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+except ImportError as e:
+    print(f"Missing tkinter: {e}")
+    print("Please install tkinter:")
+    print("  Ubuntu/Debian: sudo apt-get install python3-tk")
+    print("  CentOS/RHEL: sudo yum install tkinter")
+    print("  macOS: tkinter should be included with Python")
+    sys.exit(1)
+
+import threading
 
 from gui.main_window import MainWindow
 from core.controller_manager import ControllerManager
