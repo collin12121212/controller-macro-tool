@@ -159,7 +159,7 @@ class ControllerDisplay:
         
     def draw_modern_dpad(self):
         """Draw modern D-pad with individual directional buttons"""
-        center_x, center_y = 85, 130
+        center_x, center_y = 85, 180  # Moved lower to avoid overlap with left stick
         button_size = 10
         
         # D-pad directions
@@ -261,9 +261,9 @@ class ControllerDisplay:
             
     def draw_analog_sticks(self):
         """Draw analog sticks with movement indication"""
-        # Left stick
-        left_x, left_y = 85, 180
-        # Right stick  
+        # Left stick - positioned higher (Xbox layout)
+        left_x, left_y = 85, 130
+        # Right stick - positioned lower (Xbox layout)
         right_x, right_y = 215, 180
         
         for stick_name, (base_x, base_y) in [('left', (left_x, left_y)), ('right', (right_x, right_y))]:
