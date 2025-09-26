@@ -15,6 +15,17 @@ class MacroRecorder:
         self.last_state = {}
         self.recording_thread = None
         
+        # Debug flag for coordinate system logging
+        self._debug_coordinates = False
+        
+    def enable_coordinate_debugging(self, enabled=True):
+        """Enable or disable coordinate system debugging for stick recording"""
+        self._debug_coordinates = enabled
+        if enabled:
+            print("🎮 Recording coordinate debugging enabled - will show stick coordinate recording")
+        else:
+            print("🎮 Recording coordinate debugging disabled")
+        
     def start_recording(self):
         """Start recording controller inputs"""
         self.recording = True
@@ -136,11 +147,12 @@ class MacroRecorder:
                     'duration': 0
                 })
                 
-        # Check analog stick changes (with maximum precision)
+        # Check analog stick changes (with maximum precision and improved deadzone handling)
         current_sticks = current_state.get('sticks', {})
         last_sticks = self.last_state.get('sticks', {})
         
-        deadzone = 0.01  # Reduced deadzone for maximum precision
+        # Reduced deadzone for maximum precision, but with improved deadzone calculation
+        base_deadzone = 0.01  
         for stick, (x, y) in current_sticks.items():
             last_pos = last_sticks.get(stick, (0, 0))
             last_x, last_y = last_pos
@@ -149,11 +161,19 @@ class MacroRecorder:
             delta_x = abs(x - last_x)
             delta_y = abs(y - last_y)
             
+            # Use circular deadzone for more natural stick behavior
+            distance_moved = (delta_x ** 2 + delta_y ** 2) ** 0.5
+            
             # Record any significant movement with high precision
-            if delta_x > deadzone or delta_y > deadzone:
+            if distance_moved > base_deadzone:
                 # Validate coordinate ranges before recording
                 x_clamped = max(-1.0, min(1.0, x))
                 y_clamped = max(-1.0, min(1.0, y))
+                
+                # Enhanced debug logging for coordinate recording
+                if hasattr(self, '_debug_coordinates') and self._debug_coordinates:
+                    print(f"🎮 Recording {stick}: raw({x:6.3f}, {y:6.3f}) -> clamped({x_clamped:6.3f}, {y_clamped:6.3f})")
+                    print(f"    Note: pygame Y-axis convention: -1.0=up, +1.0=down")
                 
                 self._add_event({
                     'type': 'stick',
