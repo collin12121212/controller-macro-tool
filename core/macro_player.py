@@ -219,20 +219,26 @@ class MacroPlayer:
                 if not self.playing:
                     break
                     
-                # Reset timing for each loop
-                start_time = time.time()
+                # Reset timing for each loop with high-precision timing
+                start_time = time.perf_counter()
                 last_timestamp = 0
                 
                 for event in macro_events:
                     if not self.playing:
                         break
                         
-                    # Calculate delay
+                    # Calculate precise delay using high-resolution timing
                     event_timestamp = event.get('timestamp', 0)
                     delay = (event_timestamp - last_timestamp) / speed_multiplier
                     
                     if delay > 0:
-                        time.sleep(delay)
+                        # Use high-precision sleep for small delays
+                        if delay < 0.001:  # Less than 1ms, use busy wait for precision
+                            end_time = time.perf_counter() + delay
+                            while time.perf_counter() < end_time and self.playing:
+                                pass
+                        else:
+                            time.sleep(delay)
                         
                     # Execute event
                     self._execute_event(event)
@@ -416,22 +422,21 @@ class MacroPlayer:
             if virtual_controller_type == "vgamepad" and self.virtual_controller:
                 x, y = value
                 
-                # Fix Y-axis coordinate mapping: pygame uses +Y for down, vgamepad uses -Y for down
-                # This ensures consistent behavior between recording and playback
-                y_corrected = -y
+                # Maintain coordinate consistency - no Y-axis flip needed for maximum accuracy
+                # This ensures exact 1:1 recording/playback
                 
                 # Validate coordinate ranges (should be -1.0 to 1.0)
                 x = max(-1.0, min(1.0, x))
-                y_corrected = max(-1.0, min(1.0, y_corrected))
+                y = max(-1.0, min(1.0, y))
                 
                 # Add debug logging for coordinate transformation
                 if hasattr(self, '_debug_coordinates') and self._debug_coordinates:
-                    print(f"🎮 Stick {stick}: recorded({x:.3f}, {y:.3f}) -> playback({x:.3f}, {y_corrected:.3f})")
+                    print(f"🎮 Stick {stick}: exact replay({x:.6f}, {y:.6f})")
                 
                 if stick == 'stick_left' or stick == 'left':
-                    self.virtual_controller.left_joystick_float(x_value_float=x, y_value_float=y_corrected)
+                    self.virtual_controller.left_joystick_float(x_value_float=x, y_value_float=y)
                 elif stick == 'stick_right' or stick == 'right':
-                    self.virtual_controller.right_joystick_float(x_value_float=x, y_value_float=y_corrected)
+                    self.virtual_controller.right_joystick_float(x_value_float=x, y_value_float=y)
                 else:
                     print(f"⚠️  Unknown stick '{stick}' - not mapped for virtual controller")
                     return
@@ -507,3 +512,35 @@ class MacroPlayer:
             'sticks': {'left': (0.0, 0.0), 'right': (0.0, 0.0)},
             'triggers': {'LT': 0.0, 'RT': 0.0}
         }
+        
+        # If virtual controller is available, physically reset it to neutral
+        if self.use_virtual_controller and self.virtual_controller:
+            try:
+                # Reset all sticks to center
+                self.virtual_controller.left_joystick_float(x_value_float=0.0, y_value_float=0.0)
+                self.virtual_controller.right_joystick_float(x_value_float=0.0, y_value_float=0.0)
+                
+                # Reset all triggers to 0
+                self.virtual_controller.left_trigger_float(value_float=0.0)
+                self.virtual_controller.right_trigger_float(value_float=0.0)
+                
+                # Release all buttons
+                button_list = [
+                    vg.XUSB_BUTTON.XUSB_GAMEPAD_A, vg.XUSB_BUTTON.XUSB_GAMEPAD_B,
+                    vg.XUSB_BUTTON.XUSB_GAMEPAD_X, vg.XUSB_BUTTON.XUSB_GAMEPAD_Y,
+                    vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER, vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
+                    vg.XUSB_BUTTON.XUSB_GAMEPAD_START, vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK,
+                    vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB, vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB,
+                    vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN,
+                    vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT
+                ]
+                
+                if virtual_controller_type == "vgamepad":
+                    for button in button_list:
+                        self.virtual_controller.release_button(button=button)
+                
+                # Commit all changes
+                self.virtual_controller.update()
+                
+            except Exception as e:
+                print(f"Warning: Could not reset virtual controller state: {e}")
