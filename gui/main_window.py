@@ -28,6 +28,9 @@ class MainWindow:
         self.macros = {}
         self.macro_counter = 1  # Fix for macro naming issue
         
+        # Enhanced macro format - each macro is now a dict with 'data' and 'hotkey'
+        self.macro_metadata = {}  # Store metadata separately for compatibility
+        
         # Initialize notification system
         self.notification_manager = None  # Will be initialized after UI setup
         self.status_manager = None        # Will be initialized after status bar setup
@@ -78,6 +81,9 @@ class MainWindow:
         self.hotkey_manager.register_callback('stop_all', self.stop_all)
         self.hotkey_manager.register_callback('quick_record', self.quick_record)
         self.hotkey_manager.register_callback('emergency_stop', self.emergency_stop)
+        
+        # Register callback for individual macro playback
+        self.hotkey_manager.register_callback('play_macro', self.play_macro_by_name)
         
         # Start monitoring
         self.hotkey_manager.start_monitoring()
@@ -203,6 +209,34 @@ class MainWindow:
         
         load_btn = ttk.Button(file_frame, text="📁 Load Library", command=self.load_macros)
         load_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        
+        # Hotkey management section
+        hotkey_frame = ttk.LabelFrame(center_frame, text="Hotkey Management", padding=10)
+        hotkey_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Selected macro hotkey display
+        self.selected_macro_label = ttk.Label(hotkey_frame, text="Select a macro to manage hotkeys")
+        self.selected_macro_label.pack(anchor=tk.W, pady=(0, 5))
+        
+        # Hotkey input frame
+        hotkey_input_frame = ttk.Frame(hotkey_frame)
+        hotkey_input_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(hotkey_input_frame, text="Hotkey:").pack(side=tk.LEFT)
+        
+        self.hotkey_entry = ttk.Entry(hotkey_input_frame, width=20)
+        self.hotkey_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        
+        # Hotkey buttons
+        hotkey_btn_frame = ttk.Frame(hotkey_frame)
+        hotkey_btn_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(hotkey_btn_frame, text="Set Hotkey", command=self.set_selected_macro_hotkey).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(hotkey_btn_frame, text="Remove", command=self.remove_selected_macro_hotkey).pack(side=tk.LEFT)
+        
+        # Help text
+        help_text = "Format: Ctrl+F1, Shift+A, F12, etc."
+        ttk.Label(hotkey_frame, text=help_text, style='Muted.TLabel').pack(anchor=tk.W, pady=(5, 0))
         
     def setup_right_panel(self):
         """Setup right panel with macro editor"""
@@ -400,24 +434,72 @@ class MainWindow:
         
     def on_macro_select(self, event):
         """Handle macro selection"""
-        selection = self.macro_listbox.curselection()
-        if selection:
-            macro_name = self.macro_listbox.get(selection[0])
-            if macro_name in self.macros:
-                self.macro_editor.load_macro(self.macros[macro_name])
-                self.status_manager.update_status(f"Selected macro: {macro_name}", "info")
+        macro_name = self.get_selected_macro_name()
+        if macro_name and macro_name in self.macros:
+            self.macro_editor.load_macro(self.macros[macro_name])
+            self.status_manager.update_status(f"Selected macro: {macro_name}", "info")
+            
+            # Update hotkey management UI
+            self.update_hotkey_ui(macro_name)
+                
+    def update_hotkey_ui(self, macro_name):
+        """Update the hotkey management UI for the selected macro"""
+        hotkey = self.get_macro_hotkey(macro_name)
+        self.selected_macro_label.config(text=f"Hotkey for '{macro_name}': {hotkey}")
+        self.hotkey_entry.delete(0, tk.END)
+        if hotkey != "Not set":
+            self.hotkey_entry.insert(0, hotkey)
+            
+    def set_selected_macro_hotkey(self):
+        """Set hotkey for the currently selected macro"""
+        macro_name = self.get_selected_macro_name()
+        if not macro_name:
+            self.notification_manager.show_notification(
+                "Please select a macro first",
+                "warning"
+            )
+            return
+        hotkey_string = self.hotkey_entry.get().strip()
+        
+        if not hotkey_string:
+            self.notification_manager.show_notification(
+                "Please enter a hotkey combination",
+                "warning"
+            )
+            return
+            
+        if self.set_macro_hotkey(macro_name, hotkey_string):
+            self.update_hotkey_ui(macro_name)
+            self.update_macro_list()  # Refresh list to show hotkey
+            
+    def remove_selected_macro_hotkey(self):
+        """Remove hotkey for the currently selected macro"""
+        macro_name = self.get_selected_macro_name()
+        if not macro_name:
+            self.notification_manager.show_notification(
+                "Please select a macro first",
+                "warning"
+            )
+            return
+        self.remove_macro_hotkey(macro_name)
+        self.update_hotkey_ui(macro_name)
+        self.update_macro_list()  # Refresh list
+        
+        self.notification_manager.show_notification(
+            f"Hotkey removed from macro '{macro_name}'",
+            "info"
+        )
                 
     def play_selected_macro(self, event=None):
         """Play the selected macro"""
-        selection = self.macro_listbox.curselection()
-        if not selection:
+        macro_name = self.get_selected_macro_name()
+        if not macro_name:
             self.notification_manager.show_notification(
                 "Please select a macro from the library to play",
                 "warning"
             )
             return
             
-        macro_name = self.macro_listbox.get(selection[0])
         if macro_name in self.macros:
             macro_data = self.macros[macro_name]
             
@@ -464,27 +546,24 @@ class MainWindow:
             
     def edit_selected_macro(self):
         """Edit the selected macro"""
-        selection = self.macro_listbox.curselection()
-        if not selection:
+        macro_name = self.get_selected_macro_name()
+        if not macro_name:
             messagebox.showwarning("Warning", "Please select a macro to edit")
             return
             
-        macro_name = self.macro_listbox.get(selection[0])
         if macro_name in self.macros:
             self.macro_editor.load_macro(self.macros[macro_name])
             self.macro_editor.set_edit_mode(True)
             
     def delete_selected_macro(self):
         """Delete the selected macro"""
-        selection = self.macro_listbox.curselection()
-        if not selection:
+        macro_name = self.get_selected_macro_name()
+        if not macro_name:
             self.notification_manager.show_notification(
                 "Please select a macro to delete",
                 "warning"
             )
             return
-            
-        macro_name = self.macro_listbox.get(selection[0])
         
         # Enhanced confirmation dialog
         confirm = messagebox.askyesno(
@@ -496,6 +575,11 @@ class MainWindow:
         if confirm:
             try:
                 del self.macros[macro_name]
+                # Clean up hotkey and metadata
+                self.remove_macro_hotkey(macro_name)
+                if macro_name in self.macro_metadata:
+                    del self.macro_metadata[macro_name]
+                    
                 self.update_macro_list()
                 self.status_manager.update_status(f"Deleted macro '{macro_name}'", "info")
                 self.notification_manager.show_notification(
@@ -505,6 +589,10 @@ class MainWindow:
                 
                 # Clear editor if this macro was loaded
                 self.macro_editor.load_macro([])
+                
+                # Clear hotkey UI
+                self.selected_macro_label.config(text="Select a macro to manage hotkeys")
+                self.hotkey_entry.delete(0, tk.END)
                 
             except Exception as e:
                 self.notification_manager.show_notification(
@@ -516,7 +604,24 @@ class MainWindow:
         """Update the macro listbox"""
         self.macro_listbox.delete(0, tk.END)
         for macro_name in sorted(self.macros.keys()):
-            self.macro_listbox.insert(tk.END, macro_name)
+            hotkey = self.get_macro_hotkey(macro_name)
+            if hotkey != "Not set":
+                display_name = f"{macro_name} [{hotkey}]"
+            else:
+                display_name = macro_name
+            self.macro_listbox.insert(tk.END, display_name)
+            
+    def get_selected_macro_name(self):
+        """Get the actual macro name from the selected display item"""
+        selection = self.macro_listbox.curselection()
+        if not selection:
+            return None
+            
+        display_name = self.macro_listbox.get(selection[0])
+        # Extract the actual macro name (remove hotkey display if present)
+        if '[' in display_name and display_name.endswith(']'):
+            return display_name.split(' [')[0]
+        return display_name
             
     def save_macros(self):
         """Save macros to file"""
@@ -533,7 +638,7 @@ class MainWindow:
         )
         if file_path:
             try:
-                self.config_manager.save_macros(self.macros, file_path)
+                self.config_manager.save_macros(self.macros, file_path, self.macro_metadata)
                 self.status_manager.update_status(f"Macros saved to {file_path}", "success")
                 self.notification_manager.show_notification(
                     f"Successfully saved {len(self.macros)} macros",
@@ -552,9 +657,17 @@ class MainWindow:
         )
         if file_path:
             try:
-                loaded_macros = self.config_manager.load_macros(file_path)
+                loaded_macros, loaded_metadata = self.config_manager.load_macros(file_path)
                 if loaded_macros:
                     self.macros.update(loaded_macros)
+                    self.macro_metadata.update(loaded_metadata)
+                    
+                    # Restore hotkeys from metadata
+                    for macro_name, metadata in loaded_metadata.items():
+                        if 'hotkey' in metadata:
+                            keys = self.hotkey_manager.parse_hotkey_string(metadata['hotkey'])
+                            self.hotkey_manager.set_macro_hotkey(macro_name, keys)
+                    
                     self.update_macro_list()
                     self.status_manager.update_status(
                         f"Loaded {len(loaded_macros)} macros from {file_path}", 
@@ -581,7 +694,97 @@ class MainWindow:
             self.stop_recording()
         self.macro_player.stop_playback()
         
-    # Hotkey callback methods
+    def play_macro_by_name(self, macro_name):
+        """Play a specific macro by name (used by individual hotkeys)"""
+        if macro_name not in self.macros:
+            self.notification_manager.show_notification(
+                f"Macro '{macro_name}' not found",
+                "error"
+            )
+            return
+            
+        macro_data = self.macros[macro_name]
+        
+        # Check if macro player is already playing
+        if self.macro_player.is_playing():
+            self.notification_manager.show_notification(
+                f"Already playing a macro. Stop current playback first.",
+                "warning"
+            )
+            return
+            
+        def play():
+            try:
+                self.status_manager.update_status(f"Playing macro '{macro_name}' via hotkey...", "playing")
+                success = self.macro_player.play_macro(macro_data)
+                
+                if success:
+                    self.root.after(0, lambda: self.notification_manager.show_notification(
+                        f"Playing '{macro_name}' via hotkey",
+                        "success"
+                    ))
+                    
+                    # Wait for playback to complete
+                    while self.macro_player.is_playing():
+                        time.sleep(0.1)
+                        
+                    self.root.after(0, lambda: self.status_manager.update_status(
+                        f"Playback of '{macro_name}' completed", "success"
+                    ))
+                else:
+                    self.root.after(0, lambda: self.notification_manager.show_notification(
+                        f"Failed to start playback of '{macro_name}'",
+                        "error"
+                    ))
+                    
+            except Exception as e:
+                self.root.after(0, lambda: self.notification_manager.show_notification(
+                    f"Error playing macro: {str(e)}",
+                    "error"
+                ))
+            
+        thread = threading.Thread(target=play, daemon=True)
+        thread.start()
+        
+    def set_macro_hotkey(self, macro_name, hotkey_string):
+        """Set a hotkey for a specific macro"""
+        if macro_name not in self.macros:
+            return False
+            
+        # Parse the hotkey string into key objects
+        keys = self.hotkey_manager.parse_hotkey_string(hotkey_string)
+        
+        # Try to set the hotkey
+        if self.hotkey_manager.set_macro_hotkey(macro_name, keys):
+            # Store the hotkey string in metadata for persistence
+            if macro_name not in self.macro_metadata:
+                self.macro_metadata[macro_name] = {}
+            self.macro_metadata[macro_name]['hotkey'] = hotkey_string
+            
+            self.notification_manager.show_notification(
+                f"Hotkey '{hotkey_string}' assigned to macro '{macro_name}'",
+                "success"
+            )
+            return True
+        else:
+            self.notification_manager.show_notification(
+                f"Hotkey conflict! '{hotkey_string}' is already in use.",
+                "error"
+            )
+            return False
+            
+    def remove_macro_hotkey(self, macro_name):
+        """Remove a macro's hotkey"""
+        self.hotkey_manager.remove_macro_hotkey(macro_name)
+        if macro_name in self.macro_metadata:
+            self.macro_metadata[macro_name].pop('hotkey', None)
+            
+    def get_macro_hotkey(self, macro_name):
+        """Get a macro's hotkey string"""
+        if macro_name in self.macro_metadata:
+            return self.macro_metadata[macro_name].get('hotkey', 'Not set')
+        return 'Not set'
+        
     def play_last_macro(self):
         """Play the most recently created or used macro"""
         if not self.macros:
