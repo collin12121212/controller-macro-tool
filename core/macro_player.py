@@ -52,6 +52,9 @@ class MacroPlayer:
             'triggers': {'LT': 0.0, 'RT': 0.0}
         }
         
+        # Debug flag for coordinate system logging
+        self._debug_coordinates = False
+        
         # Key mappings for controller buttons to keyboard keys (fallback)
         self.key_mappings = {
             'A': Key.space,
@@ -158,6 +161,14 @@ class MacroPlayer:
                 status['message'] = f"Virtual controller not supported on {platform.system()}"
         
         return status
+        
+    def enable_coordinate_debugging(self, enabled=True):
+        """Enable or disable coordinate system debugging for stick events"""
+        self._debug_coordinates = enabled
+        if enabled:
+            print("🎮 Coordinate debugging enabled - will show stick coordinate transformations")
+        else:
+            print("🎮 Coordinate debugging disabled")
         
     def play_macro(self, macro_events, settings=None):
         """Play a recorded macro"""
@@ -404,10 +415,23 @@ class MacroPlayer:
         try:
             if virtual_controller_type == "vgamepad" and self.virtual_controller:
                 x, y = value
+                
+                # Fix Y-axis coordinate mapping: pygame uses +Y for down, vgamepad uses -Y for down
+                # This ensures consistent behavior between recording and playback
+                y_corrected = -y
+                
+                # Validate coordinate ranges (should be -1.0 to 1.0)
+                x = max(-1.0, min(1.0, x))
+                y_corrected = max(-1.0, min(1.0, y_corrected))
+                
+                # Add debug logging for coordinate transformation
+                if hasattr(self, '_debug_coordinates') and self._debug_coordinates:
+                    print(f"🎮 Stick {stick}: recorded({x:.3f}, {y:.3f}) -> playback({x:.3f}, {y_corrected:.3f})")
+                
                 if stick == 'stick_left' or stick == 'left':
-                    self.virtual_controller.left_joystick_float(x_value_float=x, y_value_float=y)
+                    self.virtual_controller.left_joystick_float(x_value_float=x, y_value_float=y_corrected)
                 elif stick == 'stick_right' or stick == 'right':
-                    self.virtual_controller.right_joystick_float(x_value_float=x, y_value_float=y)
+                    self.virtual_controller.right_joystick_float(x_value_float=x, y_value_float=y_corrected)
                 else:
                     print(f"⚠️  Unknown stick '{stick}' - not mapped for virtual controller")
                     return
