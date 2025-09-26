@@ -90,21 +90,38 @@ class MacroRecorder:
                     'duration': 0
                 })
                 
-        # Check analog stick changes (with deadzone)
+        # Check analog stick changes (with improved deadzone handling)
         current_sticks = current_state.get('sticks', {})
         last_sticks = self.last_state.get('sticks', {})
         
         deadzone = 0.1
         for stick, (x, y) in current_sticks.items():
             last_pos = last_sticks.get(stick, (0, 0))
+            last_x, last_y = last_pos
             
-            # Check if movement is significant
-            if (abs(x - last_pos[0]) > deadzone or abs(y - last_pos[1]) > deadzone):
+            # Calculate movement deltas
+            delta_x = abs(x - last_x)
+            delta_y = abs(y - last_y)
+            
+            # Check if movement is significant (improved handling for simultaneous inputs)
+            # Record if either axis moves significantly OR if the overall magnitude changes significantly
+            current_magnitude = (x*x + y*y) ** 0.5
+            last_magnitude = (last_x*last_x + last_y*last_y) ** 0.5
+            magnitude_change = abs(current_magnitude - last_magnitude)
+            
+            significant_movement = (delta_x > deadzone or delta_y > deadzone or 
+                                  magnitude_change > deadzone)
+            
+            if significant_movement:
+                # Validate coordinate ranges before recording
+                x_clamped = max(-1.0, min(1.0, x))
+                y_clamped = max(-1.0, min(1.0, y))
+                
                 self._add_event({
                     'type': 'stick',
                     'timestamp': current_time,
                     'button': f'stick_{stick}',
-                    'value': (x, y),
+                    'value': (x_clamped, y_clamped),
                     'duration': 0
                 })
                 
