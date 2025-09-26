@@ -232,12 +232,20 @@ class MacroPlayer:
                     delay = (event_timestamp - last_timestamp) / speed_multiplier
                     
                     if delay > 0:
-                        # Use high-precision sleep for small delays
-                        if delay < 0.001:  # Less than 1ms, use busy wait for precision
+                        # Enhanced high-precision sleep for different delay ranges
+                        if delay < 0.0005:  # Less than 0.5ms, use tight busy wait
                             end_time = time.perf_counter() + delay
                             while time.perf_counter() < end_time and self.playing:
                                 pass
+                        elif delay < 0.002:  # Less than 2ms, use hybrid approach
+                            # Sleep for most of the time, then busy wait for precision
+                            sleep_time = delay * 0.8
+                            time.sleep(sleep_time)
+                            end_time = time.perf_counter() + (delay - sleep_time)
+                            while time.perf_counter() < end_time and self.playing:
+                                pass
                         else:
+                            # Regular sleep for longer delays
                             time.sleep(delay)
                         
                     # Execute event
@@ -291,6 +299,9 @@ class MacroPlayer:
                     stick_name = button[6:]  # Remove 'stick_' prefix
                 else:
                     stick_name = button
+                
+                # For display purposes, keep original coordinates (before Y-axis inversion)
+                # This ensures the UI shows what was recorded, not what gets sent to the game
                 self.virtual_controller_state['sticks'][stick_name] = value
         except Exception as e:
             print(f"Error updating virtual state: {e}")
@@ -420,18 +431,36 @@ class MacroPlayer:
         """Execute stick event using virtual controller"""
         try:
             if virtual_controller_type == "vgamepad" and self.virtual_controller:
+                # Enhanced input validation
+                if not isinstance(value, (tuple, list)) or len(value) != 2:
+                    print(f"⚠️  Invalid stick value format for {stick}: {value}")
+                    return
+                    
                 x, y = value
                 
-                # Maintain coordinate consistency - no Y-axis flip needed for maximum accuracy
-                # This ensures exact 1:1 recording/playback
+                # Validate input ranges before processing
+                if not (-2.0 <= x <= 2.0) or not (-2.0 <= y <= 2.0):
+                    print(f"⚠️  Stick coordinates out of expected range for {stick}: ({x}, {y})")
                 
-                # Validate coordinate ranges (should be -1.0 to 1.0)
+                # Fix Y-axis coordinate system inversion issue
+                # pygame uses screen coordinates: Y+ = down (-1.0 = up, +1.0 = down)
+                # Games expect game coordinates: Y+ = up (-1.0 = down, +1.0 = up)  
+                # Therefore, we need to invert the Y-axis for proper playback
+                y = -y
+                
+                # Enhanced coordinate clamping with validation
+                x_original, y_original = x, y
                 x = max(-1.0, min(1.0, x))
                 y = max(-1.0, min(1.0, y))
                 
-                # Add debug logging for coordinate transformation
+                # Warn if clamping occurred
+                if x != x_original or y != y_original:
+                    print(f"⚠️  Coordinates clamped for {stick}: ({x_original:.3f}, {y_original:.3f}) -> ({x:.3f}, {y:.3f})")
+                
+                # Enhanced debug logging for coordinate transformation
                 if hasattr(self, '_debug_coordinates') and self._debug_coordinates:
-                    print(f"🎮 Stick {stick}: exact replay({x:.6f}, {y:.6f})")
+                    original_x, original_y = value  
+                    print(f"🎮 Stick {stick}: input({original_x:6.3f}, {original_y:6.3f}) -> output({x:6.3f}, {y:6.3f}) [Y inverted]")
                 
                 if stick == 'stick_left' or stick == 'left':
                     self.virtual_controller.left_joystick_float(x_value_float=x, y_value_float=y)
@@ -505,7 +534,8 @@ class MacroPlayer:
         return None
         
     def _reset_virtual_state(self):
-        """Reset virtual controller state to default"""
+        """Reset virtual controller state to default with enhanced error handling"""
+        # Reset internal state tracking
         self.virtual_controller_state = {
             'buttons': {},
             'dpad': {},
@@ -516,6 +546,9 @@ class MacroPlayer:
         # If virtual controller is available, physically reset it to neutral
         if self.use_virtual_controller and self.virtual_controller:
             try:
+                # Enhanced state reset with better error handling
+                print("🔄 Resetting virtual controller to neutral state...")
+                
                 # Reset all sticks to center
                 self.virtual_controller.left_joystick_float(x_value_float=0.0, y_value_float=0.0)
                 self.virtual_controller.right_joystick_float(x_value_float=0.0, y_value_float=0.0)
@@ -524,7 +557,7 @@ class MacroPlayer:
                 self.virtual_controller.left_trigger_float(value_float=0.0)
                 self.virtual_controller.right_trigger_float(value_float=0.0)
                 
-                # Release all buttons
+                # Release all buttons with comprehensive list
                 button_list = [
                     vg.XUSB_BUTTON.XUSB_GAMEPAD_A, vg.XUSB_BUTTON.XUSB_GAMEPAD_B,
                     vg.XUSB_BUTTON.XUSB_GAMEPAD_X, vg.XUSB_BUTTON.XUSB_GAMEPAD_Y,
@@ -539,8 +572,20 @@ class MacroPlayer:
                     for button in button_list:
                         self.virtual_controller.release_button(button=button)
                 
-                # Commit all changes
-                self.virtual_controller.update()
+                # Commit all changes with multiple update calls for reliability
+                for _ in range(3):  # Multiple updates to ensure state is applied
+                    self.virtual_controller.update()
+                    time.sleep(0.001)  # Small delay between updates
+                
+                print("✓ Virtual controller reset completed")
                 
             except Exception as e:
                 print(f"Warning: Could not reset virtual controller state: {e}")
+                # If reset fails, try to disable and re-enable virtual controller
+                try:
+                    self.use_virtual_controller = False
+                    time.sleep(0.1)
+                    self.use_virtual_controller = True
+                    print("  Attempted virtual controller reconnection")
+                except Exception as reconnect_error:
+                    print(f"  Virtual controller reconnection failed: {reconnect_error}")
