@@ -33,8 +33,11 @@ class MacroPlayer:
         self.controller_manager = controller_manager
         self.playing = False
         self.playback_thread = None
-        self.keyboard = KeyboardController()
-        self.mouse = MouseController()
+        
+        # Initialize keyboard/mouse controllers with error handling
+        self.keyboard = None
+        self.mouse = None
+        self._setup_input_controllers()
         
         # Virtual controller setup
         self.virtual_controller = None
@@ -66,6 +69,18 @@ class MacroPlayer:
             'LT': Key.shift_l,
             'RT': Key.ctrl_l
         }
+    
+    def _setup_input_controllers(self):
+        """Initialize keyboard and mouse controllers with error handling"""
+        try:
+            self.keyboard = KeyboardController()
+            self.mouse = MouseController()
+            print("✓ Keyboard/mouse controllers initialized successfully")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not initialize keyboard/mouse controllers: {e}")
+            print("  Input simulation may not work in headless environments")
+            self.keyboard = None
+            self.mouse = None
         
     def _setup_virtual_controller(self):
         """Initialize virtual controller if available"""
@@ -73,11 +88,35 @@ class MacroPlayer:
         
         if virtual_controller_available and virtual_controller_type == "vgamepad":
             try:
+                # Ensure vgamepad is available by checking the global import
+                if 'vg' not in globals():
+                    raise ImportError("vgamepad module not available")
+                    
                 self.virtual_controller = vg.VX360Gamepad()
+                # Test the virtual controller with a quick button press/release
+                self.virtual_controller.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                self.virtual_controller.update()
+                self.virtual_controller.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_A)
+                self.virtual_controller.update()
+                
                 self.use_virtual_controller = True
-                print("Virtual Xbox 360 controller initialized successfully")
+                print("✓ Virtual Xbox 360 controller initialized and tested successfully")
+                print("  Games should now detect controller input during macro playback")
+            except PermissionError as e:
+                print(f"✗ Permission denied for virtual controller: {e}")
+                print("  Linux users may need to run with sudo or add user to input group")
+                print("  Falling back to keyboard/mouse simulation")
+                self.virtual_controller = None
+                self.use_virtual_controller = False
+            except ImportError as e:
+                print(f"✗ Virtual controller library not available: {e}")
+                print("  Falling back to keyboard/mouse simulation")
+                self.virtual_controller = None
+                self.use_virtual_controller = False
             except Exception as e:
-                print(f"Failed to initialize virtual controller: {e}")
+                print(f"✗ Failed to initialize virtual controller: {e}")
+                print("  Falling back to keyboard/mouse simulation")
+                self.virtual_controller = None
                 self.use_virtual_controller = False
         else:
             print(f"Virtual controller not available on {platform.system()}. Using keyboard/mouse simulation.")
@@ -85,10 +124,40 @@ class MacroPlayer:
             
     def get_playback_method(self):
         """Get the current playback method being used"""
-        if self.use_virtual_controller:
-            return "Virtual Controller"
+        if self.use_virtual_controller and self.virtual_controller:
+            return "Virtual Controller (Xbox 360)"
         else:
             return "Keyboard/Mouse Simulation"
+    
+    def check_virtual_controller_status(self):
+        """Check the current status of the virtual controller"""
+        status = {
+            'available': virtual_controller_available,
+            'type': virtual_controller_type,
+            'initialized': self.use_virtual_controller and self.virtual_controller is not None,
+            'platform': platform.system()
+        }
+        
+        if self.use_virtual_controller and self.virtual_controller:
+            try:
+                # Test virtual controller with a quick operation
+                self.virtual_controller.update()
+                status['working'] = True
+                status['message'] = "Virtual controller is working correctly"
+            except Exception as e:
+                status['working'] = False
+                status['message'] = f"Virtual controller error: {e}"
+                # Disable if it's not working
+                self.use_virtual_controller = False
+                self.virtual_controller = None
+        else:
+            status['working'] = False
+            if virtual_controller_available:
+                status['message'] = "Virtual controller initialization failed"
+            else:
+                status['message'] = f"Virtual controller not supported on {platform.system()}"
+        
+        return status
         
     def play_macro(self, macro_events, settings=None):
         """Play a recorded macro"""
@@ -219,7 +288,7 @@ class MacroPlayer:
     def _execute_virtual_button_event(self, button, pressed):
         """Execute button event using virtual controller"""
         try:
-            if virtual_controller_type == "vgamepad":
+            if virtual_controller_type == "vgamepad" and self.virtual_controller:
                 # Map controller buttons to vgamepad buttons
                 button_map = {
                     'A': vg.XUSB_BUTTON.XUSB_GAMEPAD_A,
@@ -244,17 +313,29 @@ class MacroPlayer:
                         self.virtual_controller.press_button(button=vg_button)
                     else:
                         self.virtual_controller.release_button(button=vg_button)
+                    # Always call update() to ensure the input is sent to the system
                     self.virtual_controller.update()
+                else:
+                    print(f"⚠️  Unknown button '{button}' - not mapped for virtual controller")
                     
         except Exception as e:
-            print(f"Error with virtual controller button {button}: {e}")
+            print(f"✗ Error with virtual controller button {button}: {e}")
+            print("  Virtual controller may have been disconnected, falling back to keyboard")
+            # Disable virtual controller on persistent errors
+            self.use_virtual_controller = False
+            self.virtual_controller = None
             # Fall back to keyboard simulation
             self._execute_keyboard_button_event(button, pressed)
             
     def _execute_keyboard_button_event(self, button, pressed):
         """Execute button event using keyboard simulation"""
+        if not self.keyboard:
+            print(f"⚠️  Keyboard controller not available - cannot simulate {button}")
+            return
+            
         key = self.key_mappings.get(button)
         if key is None:
+            print(f"⚠️  Button '{button}' not mapped to keyboard key")
             return
             
         try:
@@ -263,7 +344,8 @@ class MacroPlayer:
             else:
                 self.keyboard.release(key)
         except Exception as e:
-            print(f"Error executing button event {button}: {key} - {e}")
+            print(f"✗ Error executing keyboard button event {button}: {key} - {e}")
+            print("  This may be due to missing X server or permissions")
             
     def _execute_trigger_event(self, trigger, value):
         """Execute a trigger event"""
@@ -275,19 +357,31 @@ class MacroPlayer:
     def _execute_virtual_trigger_event(self, trigger, value):
         """Execute trigger event using virtual controller"""
         try:
-            if virtual_controller_type == "vgamepad":
+            if virtual_controller_type == "vgamepad" and self.virtual_controller:
                 # Map triggers to virtual controller triggers
                 if trigger == 'LT':
                     self.virtual_controller.left_trigger_float(value_float=value)
                 elif trigger == 'RT':
                     self.virtual_controller.right_trigger_float(value_float=value)
+                else:
+                    print(f"⚠️  Unknown trigger '{trigger}' - not mapped for virtual controller")
+                    return
+                # Always call update() to ensure the input is sent to the system
                 self.virtual_controller.update()
         except Exception as e:
-            print(f"Error with virtual controller trigger {trigger}: {e}")
+            print(f"✗ Error with virtual controller trigger {trigger}: {e}")
+            print("  Virtual controller may have been disconnected, falling back to keyboard")
+            # Disable virtual controller on persistent errors
+            self.use_virtual_controller = False
+            self.virtual_controller = None
             self._execute_keyboard_trigger_event(trigger, value)
             
     def _execute_keyboard_trigger_event(self, trigger, value):
         """Execute trigger event using keyboard simulation"""
+        if not self.keyboard:
+            print(f"⚠️  Keyboard controller not available - cannot simulate {trigger}")
+            return
+            
         # Map triggers to keys with pressure sensitivity simulation
         key = self.key_mappings.get(trigger)
         if key and value > 0.5:  # Threshold for activation
@@ -296,7 +390,7 @@ class MacroPlayer:
                 time.sleep(0.05)  # Brief hold
                 self.keyboard.release(key)
             except Exception as e:
-                print(f"Error executing trigger event {trigger}: {e}")
+                print(f"✗ Error executing keyboard trigger event {trigger}: {e}")
                 
     def _execute_stick_event(self, stick, value):
         """Execute an analog stick event"""
@@ -308,19 +402,31 @@ class MacroPlayer:
     def _execute_virtual_stick_event(self, stick, value):
         """Execute stick event using virtual controller"""
         try:
-            if virtual_controller_type == "vgamepad":
+            if virtual_controller_type == "vgamepad" and self.virtual_controller:
                 x, y = value
                 if stick == 'stick_left' or stick == 'left':
                     self.virtual_controller.left_joystick_float(x_value_float=x, y_value_float=y)
                 elif stick == 'stick_right' or stick == 'right':
                     self.virtual_controller.right_joystick_float(x_value_float=x, y_value_float=y)
+                else:
+                    print(f"⚠️  Unknown stick '{stick}' - not mapped for virtual controller")
+                    return
+                # Always call update() to ensure the input is sent to the system
                 self.virtual_controller.update()
         except Exception as e:
-            print(f"Error with virtual controller stick {stick}: {e}")
+            print(f"✗ Error with virtual controller stick {stick}: {e}")
+            print("  Virtual controller may have been disconnected, falling back to mouse")
+            # Disable virtual controller on persistent errors
+            self.use_virtual_controller = False
+            self.virtual_controller = None
             self._execute_mouse_stick_event(stick, value)
             
     def _execute_mouse_stick_event(self, stick, value):
         """Execute stick event using mouse simulation"""
+        if not self.mouse:
+            print(f"⚠️  Mouse controller not available - cannot simulate {stick}")
+            return
+            
         # Convert stick movement to mouse movement for demonstration
         try:
             if stick == 'stick_right':  # Use right stick for mouse
@@ -335,7 +441,7 @@ class MacroPlayer:
                     new_y = current_pos[1] + mouse_y
                     self.mouse.position = (new_x, new_y)
         except Exception as e:
-            print(f"Error executing stick event {stick}: {e}")
+            print(f"✗ Error executing mouse stick event {stick}: {e}")
             
     def is_playing(self):
         """Check if macro is currently playing"""
